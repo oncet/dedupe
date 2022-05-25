@@ -3,31 +3,64 @@ import { createHash } from "crypto";
 
 const [startingDir] = process.argv.slice(2);
 
-const dirents = await readdir(startingDir, { withFileTypes: true });
+const checkDirectory = async (dir, hashes = {}) => {
+  console.log(`Checking dir ${dir}`);
 
-const files = dirents
-  .filter((dirent) => dirent.isFile())
-  .map((dirent) => dirent.name);
+  const dirents = await readdir(dir, { withFileTypes: true });
 
-const hashes = {};
+  const subDirs = dirents
+    .filter((dirent) => !dirent.isFile())
+    .map((dirent) => dirent.name + "/");
 
-for (const file of files) {
-  const buffer = await readFile(startingDir + file);
+  const files = dirents
+    .filter((dirent) => dirent.isFile())
+    .map((dirent) => dirent.name);
 
-  const hash = createHash("sha256").update(buffer, "binary").digest("base64");
+  console.log(`Found ${files.length} file(s) and ${subDirs.length} sub-dir(s)`);
 
-  if (hashes.hasOwnProperty(hash)) {
-    const currentHash = hashes[hash];
-    const { count, files } = currentHash;
+  for (const file of files) {
+    console.log(`Checking file ${file}...`);
 
-    currentHash.count = count + 1;
-    currentHash.files = [...files, startingDir + file];
-  } else {
-    hashes[hash] = {
-      count: 1,
-      files: [startingDir + file],
-    };
+    const buffer = await readFile(dir + file);
+
+    const hash = createHash("sha256").update(buffer, "binary").digest("base64");
+
+    if (hashes.hasOwnProperty(hash)) {
+      const currentHash = hashes[hash];
+      const { count, files } = currentHash;
+
+      currentHash.count = count + 1;
+      currentHash.files = [...files, dir + file];
+    } else {
+      hashes[hash] = {
+        count: 1,
+        files: [dir + file],
+      };
+    }
   }
-}
 
-console.log(hashes);
+  for (const directory of subDirs) {
+    await checkDirectory(dir + directory, hashes);
+  }
+
+  return hashes;
+};
+
+const hashes = await checkDirectory(startingDir);
+
+const results = Object.entries(hashes).reduce((acc, hash) => {
+  const [, { count, files }] = hash;
+  if (count > 1) acc.push(files);
+  return acc;
+}, []);
+
+results.forEach((result) => {
+  console.log("Duplicated files:");
+  result.forEach((file) => {
+    console.log(" * " + file);
+  });
+});
+
+if (!results.length) {
+  console.log("No duplicated files found :D");
+}
