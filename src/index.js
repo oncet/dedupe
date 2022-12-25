@@ -3,25 +3,35 @@ import { createHash } from "crypto";
 
 const [startingDir] = process.argv.slice(2);
 
-const checkDirectory = async (dir, hashes = {}) => {
-  console.log(`Checking dir ${dir}`);
+const getFiles = async (currentDir, files = []) => {
+  console.log(`Checking dir ${currentDir}`);
 
-  const dirents = await readdir(dir, { withFileTypes: true });
+  const dirents = await readdir(currentDir, { withFileTypes: true });
 
   const subDirs = dirents
     .filter((dirent) => !dirent.isFile())
     .map((dirent) => dirent.name + "/");
 
-  const files = dirents
-    .filter((dirent) => dirent.isFile())
-    .map((dirent) => dirent.name);
+  files.push(
+    ...dirents
+      .filter((dirent) => dirent.isFile())
+      .map((dirent) => currentDir + dirent.name)
+  );
 
   console.log(`Found ${files.length} file(s) and ${subDirs.length} sub-dir(s)`);
 
+  for (const currentSubDir of subDirs) {
+    await getFiles(currentDir + currentSubDir, files);
+  }
+
+  return files;
+};
+
+const processFiles = async (files, hashes = {}) => {
   for (const file of files) {
     console.log(`Checking file ${file}...`);
 
-    const buffer = await readFile(dir + file);
+    const buffer = await readFile(file);
 
     const hash = createHash("sha256").update(buffer, "binary").digest("base64");
 
@@ -30,37 +40,22 @@ const checkDirectory = async (dir, hashes = {}) => {
       const { count, files } = currentHash;
 
       currentHash.count = count + 1;
-      currentHash.files = [...files, dir + file];
+      currentHash.files = [...files, file];
     } else {
       hashes[hash] = {
         count: 1,
-        files: [dir + file],
+        files: [file],
       };
     }
-  }
-
-  for (const directory of subDirs) {
-    await checkDirectory(dir + directory, hashes);
   }
 
   return hashes;
 };
 
-const hashes = await checkDirectory(startingDir);
+const files = await getFiles(startingDir);
 
-const results = Object.entries(hashes).reduce((acc, hash) => {
-  const [, { count, files }] = hash;
-  if (count > 1) acc.push(files);
-  return acc;
-}, []);
+console.log("files", files);
 
-results.forEach((result) => {
-  console.log("Duplicated files:");
-  result.forEach((file) => {
-    console.log(" * " + file);
-  });
-});
+const results = await processFiles(files);
 
-if (!results.length) {
-  console.log("No duplicated files found :D");
-}
+console.log("results", results);
