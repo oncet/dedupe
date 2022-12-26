@@ -1,11 +1,10 @@
-import { readdir, readFile } from "fs/promises";
+import { readdir, readFile, unlink } from "fs/promises";
 import { createHash } from "crypto";
+import prompts from "prompts";
 
 const [startingDir] = process.argv.slice(2);
 
 const getFiles = async (currentDir, files = []) => {
-  console.log(`Checking dir ${currentDir}`);
-
   const dirents = await readdir(currentDir, { withFileTypes: true });
 
   const subDirs = dirents
@@ -18,8 +17,6 @@ const getFiles = async (currentDir, files = []) => {
       .map((dirent) => currentDir + dirent.name)
   );
 
-  console.log(`Found ${files.length} file(s) and ${subDirs.length} sub-dir(s)`);
-
   for (const currentSubDir of subDirs) {
     await getFiles(currentDir + currentSubDir, files);
   }
@@ -29,8 +26,6 @@ const getFiles = async (currentDir, files = []) => {
 
 const processFiles = async (files, hashes = {}) => {
   for (const file of files) {
-    console.log(`Checking file ${file}...`);
-
     const buffer = await readFile(file);
 
     const hash = createHash("sha256").update(buffer, "binary").digest("base64");
@@ -52,10 +47,62 @@ const processFiles = async (files, hashes = {}) => {
   return hashes;
 };
 
+const getDupes = (results) => {
+  return Object.entries(results).reduce((acc, hash) => {
+    const [, { count, files: filesFoo }] = hash;
+
+    if (count > 1) acc.push(filesFoo);
+
+    return acc;
+  }, []);
+};
+
+const parseFilePath = (wslPath) => {
+  const parsedPath = wslPath
+    .replace("/mnt/a", "file:///A:")
+    .replaceAll(" ", "%20")
+    .replaceAll("(", "%28")
+    .replaceAll(")", "%29");
+
+  return parsedPath;
+};
+
+console.log("Getting complete files list...");
+
 const files = await getFiles(startingDir);
 
-console.log("files", files);
+console.log(`Processing ${files.length} file(s)...`);
 
 const results = await processFiles(files);
 
-console.log("results", results);
+console.log("Filtering duplicated files...");
+
+const dupes = getDupes(results);
+
+if (!dupes.length) {
+  console.log("No duplicated files found!");
+}
+
+for (const dupe of dupes) {
+  const { fileToKeep } = await prompts({
+    type: "select",
+    name: "fileToKeep",
+    message: "Dupe found! Which one should you keep?",
+    choices: dupe.map((file) => ({
+      title: parseFilePath(file),
+      value: file,
+    })),
+  });
+
+  if (fileToKeep) {
+    const filesToDelete = dupe.filter((file) => file !== fileToKeep);
+
+    console.log(`About to delete ${filesToDelete.length} file(s).`);
+
+    for (const fileToDelete of filesToDelete) {
+      await unlink(fileToDelete);
+    }
+
+    console.log("File(s) successfully deleted.");
+  }
+}
