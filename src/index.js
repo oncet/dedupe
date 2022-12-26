@@ -79,9 +79,7 @@ console.log("Filtering duplicated files...");
 
 const dupes = getDupes(results);
 
-if (!dupes.length) {
-  console.log("No duplicated files found!");
-}
+console.log(`Found ${dupes.length} duplicated file(s)!`);
 
 for (const dupe of dupes) {
   const { fileToKeep } = await prompts({
